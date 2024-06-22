@@ -1,0 +1,19 @@
+{
+  "name": "cloak-browser",
+  "version": "1.0.0",
+  "description": "Proxy Browser",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "watch": "nodemon --exec electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Mukul",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^31.0.2"
+  },
+  "dependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
