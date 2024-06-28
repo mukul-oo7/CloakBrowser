@@ -7,64 +7,70 @@ const axios = require('axios');
 let win;
 
 function setupProxy(win) {
-    const filter = {
-      urls: ['*://*/*']
-    };
-  
-    session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
-      const proxyUrl = 'http://localhost:8000/proxy/';
-      
-      console.log('Original URL:', details.url);
-      
-      if (!details.url.startsWith(proxyUrl)) {
-        const newUrl = proxyUrl + encodeURIComponent(details.url);
-        console.log('Redirecting to:', newUrl);
-        callback({ redirectURL: newUrl });
-      } else {
-        console.log('URL already proxied:', details.url);
-        callback({});
-      }
-    });
+  const filter = {
+    urls: ['*://*/*']
+  };
+
+  session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
+    if (win.isDestroyed()) {
+      callback({});
+      return;
+    }
+
+    const proxyUrl = 'http://localhost:8000/proxy/';
+    
+    console.log('Original URL:', details.url);
+    
+    // Check if the URL is already proxied
+    if (details.url.startsWith(proxyUrl)) {
+      console.log('Already proxied, not modifying:', details.url);
+      callback({});
+    } else if (details.url.startsWith('http://localhost:8000')) {
+      // If it's a local URL (like a Google search), we need to proxy it
+      const newUrl = proxyUrl + encodeURIComponent(details.url);
+      console.log('Local URL, proxying to:', newUrl);
+      callback({ redirectURL: newUrl });
+    } else {
+      const newUrl = proxyUrl + encodeURIComponent(details.url);
+      console.log('Redirecting to:', newUrl);
+      callback({ redirectURL: newUrl });
+    }
+  });
+}
+
+// Add this function to handle uncaught exceptions
+function handleUncaughtException(error) {
+  console.error('Uncaught Exception:', error);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('uncaught-exception', error.message);
   }
+}
 
-const createWindow = () => {
-    win = new BrowserWindow({
-        width: 800,
-        height: 600,
-        frame: false,
-        webPreferences: {
-          webviewTag: true,
-          webSecurity: false,
-          allowRunningInsecureContent: true,
-          preload: path.join(__dirname, 'browser/preload.js'),
-        }
-    });
+function createWindow() {
+  win = new BrowserWindow({
+    width: 800,
+    height: 600,
+    frame: false,
+    webPreferences: {
+      webviewTag: true,
+      webSecurity: false,
+      allowRunningInsecureContent: true,
+      preload: path.join(__dirname, 'browser/preload.js'),
+      contextIsolation: false,  // Add this line
+      nodeIntegration: true,    // Add this line
+    }
+  });
 
-    setupProxy(win);
+  setupProxy(win);
 
-    win.loadFile('browser/webui.html')
+  win.loadFile('browser/webui.html')
 
-    // setupInterceptors(session.defaultSession);
-
-    const menuTemplate = [
-        {
-            label: 'tools',
-            submenu: [
-                {
-                    label: 'Dev tools',
-                    accelerator: 'Shift+CommandOrControl+I',
-                    click: () => {
-                        win.webContents.openDevTools();
-                    }
-                }
-            ]
-        }
-    ];
-
-    win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!win.isDestroyed()) {
       console.error('Failed to load:', errorCode, errorDescription, validatedURL);
       win.loadFile('browser/error.html')
-    });
+    }
+  });
 
     Menu.setApplicationMenu(null);
 
@@ -101,24 +107,35 @@ ipcMain.handle('proxy-request', async (event, requestConfig) => {
   }
 });
 
+app.on('ready', () => {
+  try {
+    createWindow();
+  } catch (error) {
+    console.error('Error creating window:', error);
+  }
 
-app.whenReady().then(() => {
-    try {
-      createWindow();
-    } catch (error) {
-      console.error('Error creating window:', error);
-    }
+  // Set up the uncaught exception handler
+  process.on('uncaughtException', handleUncaughtException);
+});
+
+
+// app.whenReady().then(() => {
+//     try {
+//       createWindow();
+//     } catch (error) {
+//       console.error('Error creating window:', error);
+//     }
   
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        try {
-          createWindow();
-        } catch (error) {
-          console.error('Error creating window:', error);
-        }
-      }
-    });
-  });
+//     app.on('activate', () => {
+//       if (BrowserWindow.getAllWindows().length === 0) {
+//         try {
+//           createWindow();
+//         } catch (error) {
+//           console.error('Error creating window:', error);
+//         }
+//       }
+//     });
+//   });
 
 ipcMain.on('minimize-window', () => {
     win.minimize();

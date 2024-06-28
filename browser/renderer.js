@@ -10,7 +10,46 @@ document.addEventListener("DOMContentLoaded", () => {
   const minimizeBtn = document.getElementById("minimize");
   const maximizeBtn = document.getElementById("maximize");
   const closeBtn = document.getElementById("close");
+  
+  
+  function navigateToUrl(url) {
+    console.log('Navigating to:', url);
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+    }
+    const proxyUrl = 'http://localhost:8000/proxy/';
+    // Check if the URL is already a proxied URL
+    if (url.startsWith(proxyUrl)) {
+        url = decodeURIComponent(url.slice(proxyUrl.length));
+    }
+    // Always proxy the URL, even if it's a local URL
+    const finalUrl = proxyUrl + encodeURIComponent(url);
+    webview.src = finalUrl;
+    addressInput.value = url;
+}
 
+// Update the event listeners
+webview.addEventListener('did-start-loading', () => {
+    const currentUrl = webview.src;
+    console.log('Loading URL:', currentUrl);
+    const proxyUrl = 'http://localhost:8000/proxy/';
+    if (currentUrl.startsWith(proxyUrl)) {
+        addressInput.value = decodeURIComponent(currentUrl.slice(proxyUrl.length));
+    } else {
+        addressInput.value = currentUrl;
+    }
+});
+
+webview.addEventListener('did-navigate', (event) => {
+    const currentUrl = event.url;
+    console.log('Navigated to:', currentUrl);
+    const proxyUrl = 'http://localhost:8000/proxy/';
+    if (currentUrl.startsWith(proxyUrl)) {
+        addressInput.value = decodeURIComponent(currentUrl.slice(proxyUrl.length));
+    } else {
+        addressInput.value = currentUrl;
+    }
+});
 
 webview.addEventListener('will-navigate', (event) => {
     event.preventDefault();
@@ -22,25 +61,12 @@ webview.addEventListener('new-window', (event) => {
     navigateToUrl(event.url);
 });
 
-function navigateToUrl(url) {
-    console.log('Navigating to:', url);
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
-    }
-    const proxyUrl = 'http://localhost:8000/proxy/';
-    const finalUrl = proxyUrl + encodeURIComponent(url);
-    webview.src = finalUrl;
-}
+// window.electron.ipcRenderer.on('uncaught-exception', (message) => {
+//     console.error('Uncaught exception in main process:', message);
+//     // You can display this error to the user if needed
+//   });
 
 
-
-webview.addEventListener('did-start-loading', () => {
-    const currentUrl = webview.src;
-    console.log('Loading URL:', currentUrl);
-    if (!currentUrl.startsWith('http://localhost:8000/proxy/')) {
-        navigateToUrl(currentUrl);
-    }
-});
 
   webview.addEventListener("did-fail-load", (event) => {
     console.error(
@@ -66,11 +92,11 @@ webview.addEventListener('did-start-loading', () => {
   //         } else{
   //             topDomain = ['.com', '.org', '.in', '.edu', '.gov']
 
-  //             let convertedUrl = `https://www.google.com/search?q=${searchedUrl}`;
+  //             let convertedUrl = https://www.google.com/search?q=${searchedUrl};
 
   //             for(let i=0; i<topDomain.length; i++){
   //                 if(searchedUrl.endsWith(topDomain[i])){
-  //                     convertedUrl = `https://www.${searchedUrl}`;
+  //                     convertedUrl = https://www.${searchedUrl};
   //                     break;
   //                 }
   //             }
