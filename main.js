@@ -1,49 +1,62 @@
-const { app, BrowserWindow, Menu, globalShortcut, ipcMain, session } = require('electron');
+const { app, BrowserWindow, Menu, globalShortcut, ipcMain, session, net } = require('electron');
 const path = require('node:path');
 // const setupProxy = require('./proxyConfig');
 const setupInterceptors = require('./interceptor');
 const axios = require('axios');
+const https = require('https');
+const http = require('http');
+const fs = require('fs');
+const url = require('url');
+
 
 let win;
 
-function setupProxy(win) {
+function setupProxy() {
+  const proxyUrl = 'http://localhost:8000';
+
   const filter = {
-    urls: ['*://*/*']
+    urls: ['<all_urls>']
   };
 
   session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
-    if (win.isDestroyed()) {
+    if (details.url.startsWith(proxyUrl) || details.url.startsWith('file://')) {
       callback({});
-      return;
-    }
-
-    const proxyUrl = 'http://localhost:8000/proxy/';
-    
-    console.log('Original URL:', details.url);
-    
-    // Check if the URL is already proxied
-    if (details.url.startsWith(proxyUrl)) {
-      console.log('Already proxied, not modifying:', details.url);
-      callback({});
-    } else if (details.url.startsWith('http://localhost:8000')) {
-      // If it's a local URL (like a Google search), we need to proxy it
-      const newUrl = proxyUrl + encodeURIComponent(details.url);
-      console.log('Local URL, proxying to:', newUrl);
-      callback({ redirectURL: newUrl });
     } else {
-      const newUrl = proxyUrl + encodeURIComponent(details.url);
-      console.log('Redirecting to:', newUrl);
-      callback({ redirectURL: newUrl });
+      const proxyReq = net.request({
+        method: details.method,
+        url: `${proxyUrl}/proxy/${encodeURIComponent(details.url)}`,
+        session: session.defaultSession
+      });
+
+      proxyReq.on('response', (proxyRes) => {
+        const chunks = [];
+        proxyRes.on('data', (chunk) => chunks.push(chunk));
+        proxyRes.on('end', () => {
+          callback({
+            responseHeaders: proxyRes.headers,
+            statusCode: proxyRes.statusCode,
+            data: Buffer.concat(chunks)
+          });
+        });
+      });
+
+      proxyReq.on('error', (error) => {
+        console.error('Proxy request failed:', error);
+        callback({ cancel: true });
+      });
+
+      if (details.uploadData) {
+        details.uploadData.forEach(data => {
+          if (data.bytes) proxyReq.write(data.bytes);
+          else if (data.file) proxyReq.write(require('fs').readFileSync(data.file));
+        });
+      }
+
+      proxyReq.end();
+
+      return { cancel: true };
     }
   });
-}
-
-// Add this function to handle uncaught exceptions
-function handleUncaughtException(error) {
-  console.error('Uncaught Exception:', error);
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('uncaught-exception', error.message);
-  }
 }
 
 function createWindow() {
@@ -61,16 +74,19 @@ function createWindow() {
     }
   });
 
-  setupProxy(win);
 
   win.loadFile('browser/webui.html')
 
-  win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (!win.isDestroyed()) {
-      console.error('Failed to load:', errorCode, errorDescription, validatedURL);
-      win.loadFile('browser/error.html')
-    }
+  // SetupProxy();
+  
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Page failed to load:', errorCode, errorDescription);
+    win.loadFile('browser/error.html')
+    // You can load a local error page here if you want
+    // win.loadFile('error.html');
   });
+
+  
 
     Menu.setApplicationMenu(null);
 
@@ -91,52 +107,30 @@ function createWindow() {
 };
 
 
-
-ipcMain.handle('proxy-request', async (event, requestConfig) => {
-  const { url, method, headers, data } = requestConfig;
-  try {
-    const response = await axios({
-      url,
-      method,
-      headers,
-      data,
-    });
-    return response.data;
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-
-app.on('ready', () => {
-  try {
-    createWindow();
-  } catch (error) {
-    console.error('Error creating window:', error);
-  }
-
-  // Set up the uncaught exception handler
-  process.on('uncaughtException', handleUncaughtException);
-});
-
-
-// app.whenReady().then(() => {
-//     try {
-//       createWindow();
-//     } catch (error) {
-//       console.error('Error creating window:', error);
-//     }
+app.whenReady().then(() => {
+    try {
+      setupProxy();
+      createWindow();
+    } catch (error) {
+      console.error('Error creating window:', error);
+    }
   
-//     app.on('activate', () => {
-//       if (BrowserWindow.getAllWindows().length === 0) {
-//         try {
-//           createWindow();
-//         } catch (error) {
-//           console.error('Error creating window:', error);
-//         }
-//       }
-//     });
-//   });
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        try {
+          createWindow();
+        } catch (error) {
+          console.error('Error creating window:', error);
+        }
+      }
+    });
+  });
+  
+  app.on('window-all-closed', () => {
+      if (process.platform !== 'darwin') app.quit();
+  });
 
+  
 ipcMain.on('minimize-window', () => {
     win.minimize();
 });
@@ -153,6 +147,3 @@ ipcMain.on('close-window', () => {
     win.close();
 });
 
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-});
